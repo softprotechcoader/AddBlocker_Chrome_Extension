@@ -43,13 +43,30 @@
 
     // Elements to specifically avoid hiding (critical YouTube UI elements)
     const safeSelectors = [
-      'ytd-searchbox', // Search bar
+      // Search and navigation
+      'ytd-searchbox', // Main search bar
+      '#search-input', // Search input field
+      '#search-form', // Search form container
+      '#search-container', // Search container
+      '#search-icon-legacy', // Search icon
+      '#search-clear-button', // Clear search button
+      '#voice-search-button', // Voice search button
+      'input#search', // Search input element
+      'ytd-topbar-menu-button-renderer', // Top bar buttons
+      
+      // Main UI components
       'ytd-masthead', // The top navigation bar
       'ytd-menu-renderer', // Menu options
       'ytd-guide-renderer', // Side navigation
       'ytd-watch-flexy', // Video player page
       'ytd-player', // Video player itself
-      'yt-search-box' // Old search box
+      'ytd-app', // Main application container
+      'yt-search-box', // Old search box
+      
+      // Video controls
+      '.ytp-chrome-controls', // Player controls
+      '.ytp-progress-bar', // Progress bar
+      '.ytp-time-display' // Time display
     ];
 
     // Create or use existing adRemover object
@@ -57,6 +74,7 @@
       isEnabled: true,
       intervalId: null,
       observer: null,
+      removedElements: new Set(), // Track elements we've hidden
       
       // Function to clean up resources
       cleanup: function() {
@@ -105,24 +123,109 @@
       
       // Function to check if an element is a critical UI element
       isSafeElement: function(element) {
-        // Check if the element or any of its parents match the safe selectors
-        return safeSelectors.some(selector => {
-          // Check if the element itself matches
-          if (element.matches && element.matches(selector)) {
+        if (!element) return false;
+        
+        // Check element ID for search-related terms
+        if (element.id && (
+            element.id.includes('search') || 
+            element.id.includes('masthead') ||
+            element.id.includes('menu') ||
+            element.id.includes('button')
+        )) {
+          return true;
+        }
+        
+        // Check element class for search-related terms
+        if (element.className && typeof element.className === 'string' && (
+            element.className.includes('search') ||
+            element.className.includes('masthead') ||
+            element.className.includes('header') ||
+            element.className.includes('topbar')
+        )) {
+          return true;
+        }
+        
+        // Check if the element or any parent has a role of 'search'
+        if (element.getAttribute && element.getAttribute('role') === 'search') {
+          return true;
+        }
+        
+        // Check for search input elements
+        if (element.tagName === 'INPUT' && element.type === 'text') {
+          return true;
+        }
+        
+        // Check if the element matches any safe selector
+        if (safeSelectors.some(selector => {
+          try {
+            return element.matches && element.matches(selector);
+          } catch (e) {
+            return false;
+          }
+        })) {
+          return true;
+        }
+        
+        // Check all parent elements up to the document root
+        let parent = element.parentElement;
+        let depth = 0;
+        const MAX_DEPTH = 10; // Limit how far up we check to prevent infinite loops
+        
+        while (parent && depth < MAX_DEPTH) {
+          // Check if parent matches any safe selector
+          if (safeSelectors.some(selector => {
+            try {
+              return parent.matches && parent.matches(selector);
+            } catch (e) {
+              return false;
+            }
+          })) {
             return true;
           }
           
-          // Check if any parent matches
-          let parent = element.parentElement;
-          while (parent) {
-            if (parent.matches && parent.matches(selector)) {
-              return true;
-            }
-            parent = parent.parentElement;
+          // Check for search-related IDs or classes in parents
+          if (parent.id && (
+              parent.id.includes('search') || 
+              parent.id.includes('masthead') ||
+              parent.id.includes('menu') ||
+              parent.id.includes('button')
+          )) {
+            return true;
           }
           
-          return false;
-        });
+          if (parent.className && typeof parent.className === 'string' && (
+              parent.className.includes('search') ||
+              parent.className.includes('masthead') ||
+              parent.className.includes('header') ||
+              parent.className.includes('topbar')
+          )) {
+            return true;
+          }
+          
+          parent = parent.parentElement;
+          depth++;
+        }
+        
+        return false;
+      },
+      
+      // Function to restore elements that should not have been hidden
+      restoreSafeElements: function() {
+        try {
+          // Check for the search bar and restore it if missing
+          const searchInputs = document.querySelectorAll('input#search, .ytd-searchbox');
+          if (searchInputs.length === 0) {
+            // Try to find any hidden search elements and restore them
+            this.removedElements.forEach(el => {
+              if (el && el.id && (el.id.includes('search') || 
+                  (el.className && typeof el.className === 'string' && el.className.includes('search')))) {
+                el.style.display = ''; // Restore original display
+              }
+            });
+          }
+        } catch (err) {
+          console.debug('Error restoring safe elements:', err.message);
+        }
       },
       
       // Function to remove YouTube ads
@@ -138,12 +241,14 @@
               const elements = document.querySelectorAll(selector);
               if (elements.length > 0) {
                 elements.forEach(el => {
-                  // Skip critical UI elements
+                  // Skip critical UI elements with enhanced protection
                   if (window.ytAdRemover.isSafeElement(el)) {
                     return;
                   }
                   
                   if (el.style.display !== 'none') {
+                    // Store the element's original display property
+                    window.ytAdRemover.removedElements.add(el);
                     el.style.display = 'none';
                     totalBlocked++;
                   }
@@ -154,6 +259,9 @@
               console.debug('Error with selector:', selector);
             }
           });
+          
+          // Check and restore critical UI elements that may have been removed
+          window.ytAdRemover.restoreSafeElements();
           
           // Report blocked ads
           if (totalBlocked > 0) {
@@ -219,7 +327,9 @@
         }
         
         // Periodic check for ads
-        self.intervalId = setInterval(self.removeYouTubeAds, 1000);
+        self.intervalId = setInterval(() => {
+          self.removeYouTubeAds();
+        }, 1000);
         
         // YouTube-specific event listeners
         document.addEventListener('yt-navigate-finish', self.removeYouTubeAds);
