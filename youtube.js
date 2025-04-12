@@ -143,7 +143,7 @@
                     return;
                   }
                   
-                  if (el.style.display !== 'none') {
+                  if (el.style.display !== 'none') { 
                     el.style.display = 'none';
                     totalBlocked++;
                   }
